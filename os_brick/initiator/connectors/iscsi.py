@@ -904,20 +904,26 @@ class ISCSIConnector(base.BaseLinuxConnector, base_iscsi.BaseISCSIConnector):
             if not ignore_errors:
                 raise exc
 
-    def _munge_portal(self, target):
-        """Remove brackets from portal.
+    def _munge_iscsi_target(self, target):
+        """Munge iSCSI target to comply with udev rules.
 
         In case IPv6 address was used the udev path should not contain any
         brackets. Udev code specifically forbids that.
+
+        udev replaces "invalid" chars with "_" when creating a devnode
+        (e.g., /dev/disk/by-path/ip-XXXX symlink). For example
+        targetname iqn.2016-01.com.example:test,t,1 would result in
+        path iqn.2016-01.com.example:test_t_1.
         """
         portal, iqn, lun = target
-        return (portal.replace('[', '').replace(']', ''), iqn,
+        return (portal.replace('[', '').replace(']', ''),
+                re.sub("[^\w#+\-.:=@_]", "_", iqn),
                 self._linuxscsi.process_lun_id(lun))
 
     def _get_device_path(self, connection_properties):
         if self._get_transport() == "default":
             return ["/dev/disk/by-path/ip-%s-iscsi-%s-lun-%s" %
-                    self._munge_portal(x) for x in
+                    self._munge_iscsi_target(x) for x in
                     self._get_all_targets(connection_properties)]
         else:
             # we are looking for paths in the format :
@@ -927,7 +933,7 @@ class ISCSIConnector(base.BaseLinuxConnector, base_iscsi.BaseISCSIConnector):
             for x in self._get_all_targets(connection_properties):
                 look_for_device = glob.glob(
                     '/dev/disk/by-path/*ip-%s-iscsi-%s-lun-%s' %
-                    self._munge_portal(x))
+                    self._munge_iscsi_target(x))
                 if look_for_device:
                     device_list.extend(look_for_device)
             return device_list
